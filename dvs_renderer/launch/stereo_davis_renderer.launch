@@ -21,4 +21,22 @@
         
   </node>
   
+  <!-- display -->
+  <node name="image_view_left" pkg="image_view" type="image_view">
+    <remap from="image" to="davis_left/dvs_rendering"/>
+  </node>
+
+  <node name="image_view_right" pkg="image_view" type="image_view">
+    <remap from="image" to="davis_right/dvs_rendering"/>
+  </node>
+
+	<node name="image_view_undistorted_left" pkg="image_view" type="image_view">
+    <remap from="image" to="davis_left/dvs_rectified"/>
+  </node>
+
+  <node name="image_view_undistorted_right" pkg="image_view" type="image_view">
+    <remap from="image" to="davis_right/dvs_rectified"/>
+  </node>
+
+  
 </launch>
