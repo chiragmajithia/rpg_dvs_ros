@@ -37,11 +37,11 @@
   </node>
 
 	<node name="image_view_undistorted_left" pkg="image_view" type="image_view">
-    <remap from="image" to="dvs_undistorted_left"/>
+    <remap from="image" to="dvs_rendering_left"/>
   </node>
 
   <node name="image_view_undistorted_right" pkg="image_view" type="image_view">
-    <remap from="image" to="dvs_undistorted_right"/>
+    <remap from="image" to="dvs_rendering_right"/>
   </node>
 
 

@@ -9,6 +9,8 @@ find_package(catkin REQUIRED COMPONENTS
   cv_bridge
   image_transport
   nodelet
+  image_geometry
+  camera_info_manager
 )
 
 # since we need eigen and boost search them as well
@@ -26,6 +28,8 @@ catkin_package(
     cv_bridge
     image_transport
     nodelet
+    image_geometry
+    camera_info_manager
   DEPENDS
     OpenCV
 )
@@ -46,6 +50,12 @@ add_executable(dvs_renderer
   src/renderer_node.cpp
 )
 
+add_executable(stereo_davis_renderer
+  src/image_tracking.cpp
+  src/stereo_davis_renderer.cpp
+  src/stereo_davis_renderer_node.cpp
+)
+
 # make the nodelet into a library
 add_library(dvs_renderer_nodelet
   src/image_tracking.cpp
@@ -59,12 +69,21 @@ add_dependencies(dvs_renderer
   ${catkin_EXPORTED_TARGETS}
 )
 
+add_dependencies(stereo_davis_renderer
+  ${catkin_EXPORTED_TARGETS}
+)
+
 add_dependencies(dvs_renderer_nodelet
   ${catkin_EXPORTED_TARGETS}
 )
 
 # link the executable to the necesarry libs
 target_link_libraries(dvs_renderer
+   ${catkin_LIBRARIES}
+   ${OpenCV_LIBRARIES}
+)
+
+target_link_libraries(stereo_davis_renderer
    ${catkin_LIBRARIES}
    ${OpenCV_LIBRARIES}
 )
@@ -85,3 +104,9 @@ install(TARGETS dvs_renderer_nodelet
 install(FILES dvs_renderer_nodelet.xml nodelet_stereo.launch nodelet_mono.launch
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
+
+#############
+# QTCREATOR #
+#############
+FILE(GLOB_RECURSE LibFiles "include/*")
+add_custom_target(headers SOURCES ${LibFiles})

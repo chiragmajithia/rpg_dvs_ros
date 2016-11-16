@@ -18,8 +18,8 @@
 
 #include <ros/ros.h>
 
-#include <image_transport/image_transport.h>
 #include <cv_bridge/cv_bridge.h>
+#include <image_transport/image_transport.h>
 #include <sensor_msgs/CameraInfo.h>
 #include <sensor_msgs/Image.h>
 #include <sensor_msgs/image_encodings.h>
@@ -32,12 +32,14 @@
 #include <dvs_msgs/Event.h>
 #include <dvs_msgs/EventArray.h>
 
+#include <deque>
+
 namespace dvs_renderer
 {
-
-class Renderer {
+class Renderer
+{
 public:
-  Renderer(ros::NodeHandle & nh, ros::NodeHandle nh_private);
+  Renderer(ros::NodeHandle& nh, ros::NodeHandle nh_private);
   virtual ~Renderer();
 
 private:
@@ -47,6 +49,7 @@ private:
   void eventsCallback(const dvs_msgs::EventArray::ConstPtr& msg);
   void imageCallback(const sensor_msgs::Image::ConstPtr& msg);
 
+  void publishImageAndClearEvents();
   void publishStats();
 
   bool got_camera_info_;
@@ -60,11 +63,16 @@ private:
 
   image_transport::Subscriber image_sub_;
   cv::Mat last_image_;
-  bool used_last_image_;
 
-  struct EventStats {
+  size_t integration_length_;
+  bool use_milliseconds_;
+
+  std::deque<dvs_msgs::Event> events_;
+
+  struct EventStats
+  {
     ros::Publisher events_mean_[2]; /**< event stats output */
-    int events_counter_[2]; /**< event counters for on/off events */
+    int events_counter_[2];         /**< event counters for on/off events */
     double events_mean_lasttime_;
     double dt;
   };
@@ -72,12 +80,13 @@ private:
 
   enum DisplayMethod
   {
-    GRAYSCALE, RED_BLUE
+    GRAYSCALE,
+    RED_BLUE
   } display_method_;
 
   ImageTracking image_tracking_;
 };
 
-} // namespace
+}  // namespace
 
-#endif // DVS_RENDERER_H_
+#endif  // DVS_RENDERER_H_
