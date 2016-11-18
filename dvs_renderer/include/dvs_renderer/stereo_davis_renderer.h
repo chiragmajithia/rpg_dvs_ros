@@ -18,8 +18,10 @@
 
 #include <dvs_msgs/Event.h>
 #include <dvs_msgs/EventArray.h>
+#include <std_msgs/Time.h>
 
 #include <deque>
+#include <map>
 
 namespace dvs_renderer
 {
@@ -45,6 +47,8 @@ private:
   void imageLeftCallback(const sensor_msgs::Image::ConstPtr& msg);
   void imageRightCallback(const sensor_msgs::Image::ConstPtr& msg);
 
+  void resetTimestampsCallback(const std_msgs::Time::ConstPtr& msg);
+
   void publishImageAndClearEvents();
   void publishStats();
 
@@ -54,7 +58,12 @@ private:
   bool got_camera_info_left_;
   bool got_camera_info_right_;
   bool got_stereo_camera_model_;
+  bool is_first_event_;
+  bool is_sync_;
   cv::Mat camera_matrix_, dist_coeffs_;
+
+  ros::Time time_begin_;
+  ros::Time time_end_;
 
   //  ros::Subscriber event_sub_;
   ros::Subscriber event_left_sub_;
@@ -63,6 +72,8 @@ private:
   ros::Subscriber camera_info_left_sub_;
   ros::Subscriber camera_info_right_sub_;
 
+  ros::Subscriber reset_sub_;
+
   image_geometry::StereoCameraModel stereo_camera_model_;
 
   image_transport::Publisher image_pub_;
@@ -70,8 +81,9 @@ private:
   image_transport::Subscriber image_left_sub_;
   image_transport::Subscriber image_right_sub_;
 
-  image_transport::Publisher undistorted_image_left_pub_;
-  image_transport::Publisher undistorted_image_right_pub_;
+  image_transport::Publisher rectified_image_left_pub_;
+  image_transport::Publisher rectified_image_right_pub_;
+  image_transport::Publisher rectified_image_stereo_pub_;
   image_transport::Publisher image_left_pub_;
   image_transport::Publisher image_right_pub_;
 
@@ -81,10 +93,16 @@ private:
 
   size_t integration_length_;
   bool use_milliseconds_;
+  bool request_clear_left_queue_;
 
-  std::deque<dvs_msgs::Event> events_;
+  //  std::deque<dvs_msgs::Event> events_;
   std::deque<dvs_msgs::Event> events_left_;
   std::deque<dvs_msgs::Event> events_right_;
+  size_t idx_begin_;
+  size_t idx_end_;
+
+  std::map<ros::Time, dvs_msgs::Event> events_left_queue_;
+  std::map<ros::Time, dvs_msgs::Event> events_right_queue_;
 
   sensor_msgs::CameraInfo camera_info_left_;
   sensor_msgs::CameraInfo camera_info_right_;

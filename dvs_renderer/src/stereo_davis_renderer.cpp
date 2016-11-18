@@ -1,15 +1,19 @@
 #include "dvs_renderer/stereo_davis_renderer.h"
 #include <std_msgs/Float32.h>
-
+#include <iostream>
+//#include <iterator>
+#include <utility>
 namespace dvs_renderer
 {
 StereoDavisRenderer::StereoDavisRenderer(ros::NodeHandle& nh, ros::NodeHandle nh_private)
   : nh_(nh), nhp_(nh_private)  //, image_tracking_(nh)
 {
-  //  got_camera_info_ = false;
   got_camera_info_left_ = false;
   got_camera_info_right_ = false;
   got_stereo_camera_model_ = false;
+  request_clear_left_queue_ = false;
+  is_first_event_ = true;
+  is_sync_ = false;
 
   // get parameters of display method
   std::string display_method_str;
@@ -22,28 +26,25 @@ StereoDavisRenderer::StereoDavisRenderer(ros::NodeHandle& nh, ros::NodeHandle nh
   ROS_INFO("integration_length: %lu", integration_length_);
 
   // setup subscribers and publishers
-  event_left_sub_ = nh_.subscribe("/events_left", 1, &StereoDavisRenderer::eventsLeftCallback, this);
-  event_right_sub_ = nh_.subscribe("/events_right", 1, &StereoDavisRenderer::eventsRightCallback, this);
-  // events_left > /davis_left/events
+  event_left_sub_ = nh_.subscribe("/events_left", 0, &StereoDavisRenderer::eventsLeftCallback, this);
+  event_right_sub_ = nh_.subscribe("/events_right", 0, &StereoDavisRenderer::eventsRightCallback, this);
 
   camera_info_left_sub_ = nh_.subscribe("/camera_info_left", 1, &StereoDavisRenderer::cameraInfoLeftCallback, this);
   camera_info_right_sub_ = nh_.subscribe("/camera_info_right", 1, &StereoDavisRenderer::cameraInfoRightCallback, this);
-  // /davis_left/camera_info
 
   image_transport::ImageTransport it_(nh_);
   image_left_sub_ = it_.subscribe("/image_left", 1, &StereoDavisRenderer::imageLeftCallback, this);
-  // /davis_left/image_raw
   image_right_sub_ = it_.subscribe("/image_right", 1, &StereoDavisRenderer::imageRightCallback, this);
 
   image_left_pub_ = it_.advertise("/dvs_rendering_left", 1);
-  //  // /davis_left/dvs_rendering
   image_right_pub_ = it_.advertise("/dvs_rendering_right", 1);
 
-  undistorted_image_left_pub_ = it_.advertise("/dvs_rectified_left", 1);
-  //  // /davis_left/dvs_rectified
-  undistorted_image_right_pub_ = it_.advertise("/dvs_rectified_right", 1);
+  rectified_image_left_pub_ = it_.advertise("/dvs_rectified_left", 1);
+  rectified_image_right_pub_ = it_.advertise("/dvs_rectified_right", 1);
+  rectified_image_stereo_pub_ = it_.advertise("/dvs_rectified_stereo", 1);
 
-  //  for (int i = 0; i < 2; ++i)
+  reset_sub_ = nh_.subscribe("/reset_timestamps", 1, &StereoDavisRenderer::resetTimestampsCallback,
+                             this);  //  for (int i = 0; i < 2; ++i)
   //    for (int k = 0; k < 2; ++k)
   //      event_stats_[i].events_counter_[k] = 0;
   //  event_stats_[0].dt = 1;
@@ -55,85 +56,22 @@ StereoDavisRenderer::StereoDavisRenderer(ros::NodeHandle& nh, ros::NodeHandle nh
   //  event_stats_[1].events_mean_[0] = nh_.advertise<std_msgs::Float32>("events_on_mean_5", 1);
   //  event_stats_[1].events_mean_[1] = nh_.advertise<std_msgs::Float32>("events_off_mean_5", 1);
 }
+void StereoDavisRenderer::resetTimestampsCallback(const std_msgs::Time::ConstPtr& msg)
+{
+  ROS_INFO("stereo davis synchronized");
+  is_sync_ = true;
+}
 
 StereoDavisRenderer::~StereoDavisRenderer()
 {
   image_left_pub_.shutdown();
   image_right_pub_.shutdown();
-  undistorted_image_left_pub_.shutdown();
-  undistorted_image_right_pub_.shutdown();
-}
-
-void StereoDavisRenderer::cameraInfoLeftCallback(const sensor_msgs::CameraInfo::ConstPtr& msg)
-{
-  got_camera_info_left_ = true;
-  camera_info_left_ = *msg;
-
-  if (got_camera_info_left_ && got_camera_info_right_)
-  {
-    if (!got_stereo_camera_model_)
-    {
-      got_stereo_camera_model_ = true;
-      stereo_camera_model_.fromCameraInfo(camera_info_left_, camera_info_right_);
-      ROS_INFO("stereo camera model done");
-    }
-  }
-}
-
-void StereoDavisRenderer::cameraInfoRightCallback(const sensor_msgs::CameraInfo::ConstPtr& msg)
-{
-  got_camera_info_right_ = true;
-  camera_info_right_ = *msg;
-
-  if (got_camera_info_left_ && got_camera_info_right_)
-  {
-    if (!got_stereo_camera_model_)
-    {
-      got_stereo_camera_model_ = true;
-      stereo_camera_model_.fromCameraInfo(camera_info_left_, camera_info_right_);
-      ROS_INFO("stereo camera model done");
-    }
-  }
-}
-
-// void StereoDavisRenderer::cameraInfoCallback(const sensor_msgs::CameraInfo::ConstPtr& msg)
-//{
-//  got_camera_info_ = true;
-
-//  camera_matrix_ = cv::Mat(3, 3, CV_64F);
-//  for (int i = 0; i < 3; i++)
-//    for (int j = 0; j < 3; j++)
-//      camera_matrix_.at<double>(cv::Point(i, j)) = msg->K[i + j * 3];
-
-//  dist_coeffs_ = cv::Mat(msg->D.size(), 1, CV_64F);
-//  for (int i = 0; i < msg->D.size(); i++)
-//    dist_coeffs_.at<double>(i) = msg->D[i];
-//}
-
-void StereoDavisRenderer::imageCallback(const sensor_msgs::Image::ConstPtr& msg)
-{
-  //  image_tracking_.imageCallback(msg);
-
-  cv_bridge::CvImagePtr cv_ptr;
-
-  try
-  {
-    cv_ptr = cv_bridge::toCvCopy(msg, sensor_msgs::image_encodings::MONO8);
-  }
-  catch (cv_bridge::Exception& e)
-  {
-    ROS_ERROR("cv_bridge exception: %s", e.what());
-    return;
-  }
-
-  // convert from grayscale to color image
-  cv::cvtColor(cv_ptr->image, last_image_, CV_GRAY2BGR);
+  rectified_image_left_pub_.shutdown();
+  rectified_image_right_pub_.shutdown();
 }
 
 void StereoDavisRenderer::imageLeftCallback(const sensor_msgs::Image::ConstPtr& msg)
 {
-  //  image_tracking_.imageCallback(msg);
-
   cv_bridge::CvImagePtr cv_ptr;
 
   try
@@ -148,13 +86,10 @@ void StereoDavisRenderer::imageLeftCallback(const sensor_msgs::Image::ConstPtr& 
 
   // convert from grayscale to color image
   cv::cvtColor(cv_ptr->image, last_image_left_, CV_GRAY2BGR);
-  //  ROS_INFO("left image done");
 }
 
 void StereoDavisRenderer::imageRightCallback(const sensor_msgs::Image::ConstPtr& msg)
 {
-  //  image_tracking_.imageCallback(msg);
-
   cv_bridge::CvImagePtr cv_ptr;
 
   try
@@ -169,95 +104,110 @@ void StereoDavisRenderer::imageRightCallback(const sensor_msgs::Image::ConstPtr&
 
   // convert from grayscale to color image
   cv::cvtColor(cv_ptr->image, last_image_right_, CV_GRAY2BGR);
-  //  ROS_INFO("right image done");
 }
 
 void StereoDavisRenderer::eventsLeftCallback(const dvs_msgs::EventArray::ConstPtr& msg)
 {
-  for (const auto& e : msg->events)
+  if (is_sync_)
   {
-    events_left_.push_back(e);
-
-    if (events_right_.size() >= integration_length_)
+    for (const auto& e : msg->events)
     {
-      publishImageAndClearEvents();
+      events_left_queue_.insert(std::make_pair(e.ts, e));
+      if (events_left_queue_.size() >= integration_length_ && events_right_queue_.size() >= integration_length_)
+      {
+        publishImageAndClearEvents();
+      }
     }
   }
 }
 
 void StereoDavisRenderer::eventsRightCallback(const dvs_msgs::EventArray::ConstPtr& msg)
 {
-  for (const auto& e : msg->events)
+  if (is_sync_)
   {
-    events_right_.push_back(e);
+    for (const auto& e : msg->events)
+    {
+      events_right_queue_.insert(std::make_pair(e.ts, e));
+      if (events_left_queue_.size() >= integration_length_ && events_right_queue_.size() >= integration_length_)
+      {
+        publishImageAndClearEvents();
+      }
+    }
   }
 }
 
 void StereoDavisRenderer::publishImageAndClearEvents()
 {
   if (!last_image_left_.data || !last_image_right_.data)
+  {
     return;
+  }
 
-  // only create image if at least one subscriber
   if (image_left_pub_.getNumSubscribers() > 0 && image_right_pub_.getNumSubscribers() > 0)
   {
     cv_bridge::CvImage cv_image_left;
     cv_bridge::CvImage cv_image_right;
 
+    std::map<ros::Time, dvs_msgs::Event>::iterator it_left_begin = events_left_queue_.begin();
+    std::map<ros::Time, dvs_msgs::Event>::iterator it_right_begin = events_right_queue_.begin();
+    std::map<ros::Time, dvs_msgs::Event>::iterator it_left_end = events_left_queue_.end();
+    std::map<ros::Time, dvs_msgs::Event>::iterator it_right_end = events_right_queue_.end();
+
+    ros::Time time_begin = std::min(it_left_begin->first, it_right_begin->first);
+    ros::Time time_end = std::min(prev(it_left_end, 1)->first, prev(it_right_end, 1)->first);
+
+    it_left_end = events_left_queue_.upper_bound(time_end);
+    it_right_end = events_right_queue_.upper_bound(time_end);
+
+    //    std::cout << "left begin  " << it_left_begin->first << std::endl;
+    //    std::cout << "right begin " << it_right_begin->first << std::endl;
+    //    std::cout << "left end    " << it_left_begin->first << std::endl;
+    //    std::cout << "right end   " << it_right_end->first << std::endl;
+
+    ros::Time curr_time_stamp;
+    curr_time_stamp.fromNSec(static_cast<uint64_t>((time_begin_.toNSec() + (time_end_ - time_begin_).toNSec() / 2.0)));
+
+    //    std::cout << "event left pub :  " << std::distance(it_left_begin, it_left_end) << std::endl;
+    //    std::cout << "event left left:  " << events_left_queue_.size() - std::distance(it_left_begin, it_left_end)
+    //              << std::endl;
+    //    std::cout << "event right pub : " << std::distance(it_right_begin, it_right_end) << std::endl;
+    //    std::cout << "event right left: " << events_right_queue_.size() - std::distance(it_right_begin, it_right_end)
+    //              << std::endl;
+
     if (display_method_ == RED_BLUE)
     {
-      //      ROS_INFO("red blue start");
       cv_image_left.encoding = "bgr8";
       cv_image_right.encoding = "bgr8";
 
-      //      ROS_INFO("copy last image");
       last_image_left_.copyTo(cv_image_left.image);
       last_image_right_.copyTo(cv_image_right.image);
-      //      ROS_INFO("done");
 
-      // set time stamp as the time in the middle of the event time interval
-      //      ROS_INFO("set time stamp");
-      ros::Time time_stamp;
-      time_stamp.fromNSec(static_cast<uint64_t>(events_left_.front().ts.toNSec() +
-                                                (events_left_.back().ts - events_left_.front().ts).toNSec() / 2.0));
-      cv_image_left.header.stamp = time_stamp;
-      cv_image_right.header.stamp = time_stamp;
-      //      ROS_INFO("done");
+      cv_image_left.header.stamp = curr_time_stamp;
+      cv_image_right.header.stamp = curr_time_stamp;
 
-      //      ROS_INFO("set event left");
       // left image
-      for (size_t i = 0; i < events_left_.size(); ++i)
+      for (std::map<ros::Time, dvs_msgs::Event>::iterator it_left = it_left_begin; it_left != it_left_end; ++it_left)
       {
-        const int x = events_left_[i].x;
-        const int y = events_left_[i].y;
+        const int x = it_left->second.x;
+        const int y = it_left->second.y;
 
         cv_image_left.image.at<cv::Vec3b>(cv::Point(x, y)) =
-            (events_left_[i].polarity == true ? cv::Vec3b(255, 0, 0) : cv::Vec3b(0, 0, 255));
+            (it_left->second.polarity == true ? cv::Vec3b(255, 0, 0) : cv::Vec3b(0, 0, 255));
       }
-      //      ROS_INFO("done");
 
-      //      ROS_INFO("set event right");
       // right image
-      for (size_t i = 0; i < events_right_.size(); ++i)
+      for (std::map<ros::Time, dvs_msgs::Event>::iterator it_right = it_right_begin; it_right != it_right_end;
+           ++it_right)
       {
-        const int x = events_right_[i].x;
-        const int y = events_right_[i].y;
+        const int x = it_right->second.x;
+        const int y = it_right->second.y;
 
         cv_image_right.image.at<cv::Vec3b>(cv::Point(x, y)) =
-            (events_right_[i].polarity == true ? cv::Vec3b(255, 0, 0) : cv::Vec3b(0, 0, 255));
+            (it_right->second.polarity == true ? cv::Vec3b(255, 0, 0) : cv::Vec3b(0, 0, 255));
       }
-
-      //      for (int i = 0; i < events_.size(); ++i)
-      //      {
-      //        const int x = events_[i].x;
-      //        const int y = events_[i].y;
-
-      //        cv_image.image.at<cv::Vec3b>(cv::Point(x, y)) =
-      //            (events_[i].polarity == true ? cv::Vec3b(255, 0, 0) : cv::Vec3b(0, 0, 255));
-      //      }
-      //      ROS_INFO("done");
     }
 
+    // grayscale
     else
     {
       cv_image_left.encoding = "mono8";
@@ -279,40 +229,29 @@ void StereoDavisRenderer::publishImageAndClearEvents()
       off_events_right = cv::Scalar(0);
 
       // left image
-      for (size_t i = 0; i < events_left_.size(); ++i)
+      for (std::map<ros::Time, dvs_msgs::Event>::iterator it_left = it_left_begin; it_left != it_left_end; ++it_left)
       {
-        const int x = events_left_[i].x;
-        const int y = events_left_[i].y;
+        const int x = it_left->second.x;
+        const int y = it_left->second.y;
 
-        if (events_left_[i].polarity == 1)
+        if (it_left->second.polarity == 1)
           on_events_left.at<uint8_t>(cv::Point(x, y))++;
         else
           off_events_left.at<uint8_t>(cv::Point(x, y))++;
       }
 
       // right image
-      for (size_t i = 0; i < events_right_.size(); ++i)
+      for (std::map<ros::Time, dvs_msgs::Event>::iterator it_right = it_right_begin; it_right != it_right_end;
+           ++it_right)
       {
-        const int x = events_right_[i].x;
-        const int y = events_right_[i].y;
+        const int x = it_right->second.x;
+        const int y = it_right->second.y;
 
-        if (events_right_[i].polarity == 1)
+        if (it_right->second.polarity == 1)
           on_events_right.at<uint8_t>(cv::Point(x, y))++;
         else
           off_events_right.at<uint8_t>(cv::Point(x, y))++;
       }
-
-      // count events per pixels with polarity
-      //      for (int i = 0; i < events_.size(); ++i)
-      //      {
-      //        const int x = events_[i].x;
-      //        const int y = events_[i].y;
-
-      //        if (events_[i].polarity == 1)
-      //          on_events.at<uint8_t>(cv::Point(x, y))++;
-      //        else
-      //          off_events.at<uint8_t>(cv::Point(x, y))++;
-      //      }
 
       // scale image
       cv::normalize(on_events_left, on_events_left, 0, 128, cv::NORM_MINMAX, CV_8UC1);
@@ -328,28 +267,45 @@ void StereoDavisRenderer::publishImageAndClearEvents()
 
     image_left_pub_.publish(cv_image_left.toImageMsg());
     image_right_pub_.publish(cv_image_right.toImageMsg());
+    events_left_queue_.erase(it_left_begin, it_left_end);
+    events_right_queue_.erase(it_right_begin, it_right_end);
+    events_right_.clear();
 
-    if (got_stereo_camera_model_ && undistorted_image_left_pub_.getNumSubscribers() > 0 &&
-        undistorted_image_right_pub_.getNumSubscribers() > 0)
-    {
-      ROS_INFO("rectify start");
-      cv_bridge::CvImage cv_image2_left;
-      cv_bridge::CvImage cv_image2_right;
-      cv_image2_left.encoding = cv_image_left.encoding;
-      cv_image2_right.encoding = cv_image_right.encoding;
+    //    if (got_stereo_camera_model_ &&
+    //        ((rectified_image_left_pub_.getNumSubscribers() > 0 && rectified_image_right_pub_.getNumSubscribers() > 0)
+    //        ||
+    //         rectified_image_stereo_pub_.getNumSubscribers() > 0))
+    //    {
+    //      cv_bridge::CvImage cv_image2_left;
+    //      cv_bridge::CvImage cv_image2_right;
+    //      cv_bridge::CvImage cv_image2_stereo;
 
-      stereo_camera_model_.left().rectifyImage(cv_image_left.image, cv_image2_left.image);
-      stereo_camera_model_.right().rectifyImage(cv_image_right.image, cv_image2_right.image);
+    //      cv_image2_left.encoding = cv_image_left.encoding;
+    //      cv_image2_right.encoding = cv_image_right.encoding;
+    //      cv_image2_stereo.encoding = cv_image_left.encoding;
 
-      //      cv::undistort(cv_image.image, cv_image2.image, camera_matrix_, dist_coeffs_);
+    //      stereo_camera_model_.left().rectifyImage(cv_image_left.image, cv_image2_left.image);
+    //      stereo_camera_model_.right().rectifyImage(cv_image_right.image, cv_image2_right.image);
 
-      undistorted_image_left_pub_.publish(cv_image2_left.toImageMsg());
-      undistorted_image_right_pub_.publish(cv_image2_right.toImageMsg());
-    }
+    //      cv::Size size_left = cv_image2_left.image.size();
+    //      cv::Size size_right = cv_image2_right.image.size();
+    //      cv::Mat stereo_image(size_left.height, size_left.width + size_right.width, CV_8U);
+    //      cv::Mat left(stereo_image, cv::Rect(0, 0, size_left.width, size_left.height));
+    //      cv_image2_left.image.copyTo(left);
+    //      cv::Mat right(stereo_image, cv::Rect(size_left.width, 0, size_right.width, size_right.height));
+    //      cv_image2_right.image.copyTo(right);
+
+    //      cv_image2_stereo.image = stereo_image;
+
+    //      cv_image2_left.header.stamp = curr_time_stamp;
+    //      cv_image2_right.header.stamp = curr_time_stamp;
+    //      cv_image2_stereo.header.stamp = curr_time_stamp;
+
+    //      rectified_image_left_pub_.publish(cv_image2_left.toImageMsg());
+    //      rectified_image_right_pub_.publish(cv_image2_right.toImageMsg());
+    //      rectified_image_stereo_pub_.publish(cv_image2_stereo.toImageMsg());
+    //    }
   }
-
-  events_left_.clear();
-  events_right_.clear();
 }
 
 void StereoDavisRenderer::setStereoCameraModel()
@@ -389,6 +345,38 @@ void StereoDavisRenderer::publishStats()
         event_stats_[i].events_mean_[k].publish(msg);
         event_stats_[i].events_counter_[k] = 0;
       }
+    }
+  }
+}
+
+void StereoDavisRenderer::cameraInfoLeftCallback(const sensor_msgs::CameraInfo::ConstPtr& msg)
+{
+  got_camera_info_left_ = true;
+  camera_info_left_ = *msg;
+
+  if (got_camera_info_left_ && got_camera_info_right_)
+  {
+    if (!got_stereo_camera_model_)
+    {
+      got_stereo_camera_model_ = true;
+      stereo_camera_model_.fromCameraInfo(camera_info_left_, camera_info_right_);
+      ROS_INFO("stereo camera model done");
+    }
+  }
+}
+
+void StereoDavisRenderer::cameraInfoRightCallback(const sensor_msgs::CameraInfo::ConstPtr& msg)
+{
+  got_camera_info_right_ = true;
+  camera_info_right_ = *msg;
+
+  if (got_camera_info_left_ && got_camera_info_right_)
+  {
+    if (!got_stereo_camera_model_)
+    {
+      got_stereo_camera_model_ = true;
+      stereo_camera_model_.fromCameraInfo(camera_info_left_, camera_info_right_);
+      ROS_INFO("stereo camera model done");
     }
   }
 }

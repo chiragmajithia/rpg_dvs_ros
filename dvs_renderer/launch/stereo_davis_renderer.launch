@@ -2,7 +2,7 @@
   <!-- visualization -->
   <node name="stereo_davis_renderer" pkg="dvs_renderer" type="stereo_davis_renderer" output = "screen">
     <param name="display_method" value="grayscale"/>
-    <param name="integration_length" value="2500"/>
+    <param name="integration_length" value="1500"/>
     
     <remap from="dvs_rendering_left" to="davis_left/dvs_rendering" />
     <remap from="dvs_rendering_right" to="davis_right/dvs_rendering" />

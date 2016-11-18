@@ -96,3 +96,9 @@ install(TARGETS davis_ros_driver_nodelet
 install(FILES davis_ros_driver_nodelet.xml
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )
+
+#############
+# QTCREATOR #
+#############
+FILE(GLOB_RECURSE LibFiles "include/*")
+add_custom_target(headers SOURCES ${LibFiles})

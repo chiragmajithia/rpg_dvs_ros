@@ -1,9 +1,12 @@
 <launch>
+  <!-- DAVIS drivers -->
+  <include file="$(find davis_ros_driver)/launch/stereo.launch" />
+
   <!-- visualization -->
   <node name="stereo_davis_renderer" pkg="dvs_renderer" type="stereo_davis_renderer" output = "screen">
-    <param name="display_method" value="grayscale"/>
-    <param name="integration_length" value="2500"/>
-    
+    <param name="display_method" value="grayscale" />
+    <param name="integration_length" value="500" />
+     
     <remap from="dvs_rendering_left" to="davis_left/dvs_rendering" />
     <remap from="dvs_rendering_right" to="davis_right/dvs_rendering" />
 
@@ -20,6 +23,7 @@
     <remap from="camera_info_left" to="/davis_left/camera_info" />
     <remap from="camera_info_right" to="/davis_right/camera_info" />
         
+    <remap from="reset_timestamps" to="/davis_left/reset_timestamps" />
   </node>
   
   <!-- display -->

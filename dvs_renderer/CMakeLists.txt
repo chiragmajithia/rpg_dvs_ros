@@ -6,6 +6,7 @@ find_package(catkin REQUIRED COMPONENTS
   roscpp
   sensor_msgs
   dvs_msgs
+  std_msgs
   cv_bridge
   image_transport
   nodelet
@@ -25,6 +26,7 @@ catkin_package(
     roscpp
     sensor_msgs
     dvs_msgs
+    std_msgs
     cv_bridge
     image_transport
     nodelet
