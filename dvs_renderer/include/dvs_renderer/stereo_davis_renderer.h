@@ -60,7 +60,7 @@ private:
   bool got_stereo_camera_model_;
   bool is_first_event_;
   bool is_sync_;
-  cv::Mat camera_matrix_, dist_coeffs_;
+  //  cv::Mat camera_matrix_, dist_coeffs_;
 
   ros::Time time_begin_;
   ros::Time time_end_;
@@ -121,6 +121,12 @@ private:
     GRAYSCALE,
     RED_BLUE
   } display_method_;
+
+  enum RectificationMethod
+  {
+    BILINEAR,
+    NEAREST
+  } rectification_method_;
 
   //  ImageTracking image_tracking_;
 };
