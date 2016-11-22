@@ -86,14 +86,23 @@ private:
   image_transport::Publisher rectified_image_stereo_pub_;
   image_transport::Publisher image_left_pub_;
   image_transport::Publisher image_right_pub_;
+  image_transport::Publisher event_image_left_pub_;
+  image_transport::Publisher event_image_right_pub_;
 
   cv::Mat last_image_;
   cv::Mat last_image_left_;
   cv::Mat last_image_right_;
 
   size_t integration_length_;
+
+  size_t counter_left_;
+  size_t counter_right_;
+  ros::Time time_event_left_last_;
+  ros::Time time_event_right_last_;
+
   bool use_milliseconds_;
   bool request_clear_left_queue_;
+  bool is_binary_;
 
   //  std::deque<dvs_msgs::Event> events_;
   std::deque<dvs_msgs::Event> events_left_;

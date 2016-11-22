@@ -29,6 +29,7 @@ StereoDavisRenderer::StereoDavisRenderer(ros::NodeHandle& nh, ros::NodeHandle nh
   ROS_INFO("integration_length: %lu", integration_length_);
 
   is_sync_ = nhp_.param("is_sync", false);
+  nhp_.param("is_binary", is_binary_, false);
 
   // setup subscribers and publishers
   event_left_sub_ = nh_.subscribe("/events_left", 0, &StereoDavisRenderer::eventsLeftCallback, this);
@@ -44,23 +45,14 @@ StereoDavisRenderer::StereoDavisRenderer(ros::NodeHandle& nh, ros::NodeHandle nh
   image_left_pub_ = it_.advertise("/dvs_rendering_left", 1);
   image_right_pub_ = it_.advertise("/dvs_rendering_right", 1);
 
+  event_image_left_pub_ = it_.advertise("/dvs_event_left", 1);
+  event_image_right_pub_ = it_.advertise("/dvs_event_right", 1);
+
   rectified_image_left_pub_ = it_.advertise("/dvs_rectified_left", 1);
   rectified_image_right_pub_ = it_.advertise("/dvs_rectified_right", 1);
   rectified_image_stereo_pub_ = it_.advertise("/dvs_rectified_stereo", 1);
 
   reset_sub_ = nh_.subscribe("/reset_timestamps", 1, &StereoDavisRenderer::resetTimestampsCallback, this);
-
-  //  for (int i = 0; i < 2; ++i)
-  //    for (int k = 0; k < 2; ++k)
-  //      event_stats_[i].events_counter_[k] = 0;
-  //  event_stats_[0].dt = 1;
-  //  event_stats_[0].events_mean_lasttime_ = 0;
-  //  event_stats_[0].events_mean_[0] = nh_.advertise<std_msgs::Float32>("events_on_mean_1", 1);
-  //  event_stats_[0].events_mean_[1] = nh_.advertise<std_msgs::Float32>("events_off_mean_1", 1);
-  //  event_stats_[1].dt = 5;
-  //  event_stats_[1].events_mean_lasttime_ = 0;
-  //  event_stats_[1].events_mean_[0] = nh_.advertise<std_msgs::Float32>("events_on_mean_5", 1);
-  //  event_stats_[1].events_mean_[1] = nh_.advertise<std_msgs::Float32>("events_off_mean_5", 1);
 }
 void StereoDavisRenderer::resetTimestampsCallback(const std_msgs::Time::ConstPtr& msg)
 {
@@ -119,9 +111,20 @@ void StereoDavisRenderer::eventsLeftCallback(const dvs_msgs::EventArray::ConstPt
     for (const auto& e : msg->events)
     {
       events_left_queue_.insert(std::make_pair(e.ts, e));
+      //      time_event_left_last_ = std::prev(events_left_queue_.end(), 1)->first;
       if (events_left_queue_.size() >= integration_length_ && events_right_queue_.size() >= integration_length_)
       {
+        //        if (events_left_queue_.size() > events_right_queue_.size() &&
+        //            std::prev(events_left_queue_.end(), 1)->first < std::prev(events_right_queue_.end(), 1)->first)
+        //        {
         publishImageAndClearEvents();
+        //        }
+        //        else if (events_left_queue_.size() < events_right_queue_.size() &&
+        //                 std::prev(events_left_queue_.end(), 1)->first > std::prev(events_right_queue_.end(),
+        //                 1)->first)
+        //        {
+        //          publishImageAndClearEvents();
+        //        }
       }
     }
   }
@@ -134,8 +137,10 @@ void StereoDavisRenderer::eventsRightCallback(const dvs_msgs::EventArray::ConstP
     for (const auto& e : msg->events)
     {
       events_right_queue_.insert(std::make_pair(e.ts, e));
+      //      time_event_right_last_ = std::prev(events_right_queue_.end(), 1)->first;
       if (events_left_queue_.size() >= integration_length_ && events_right_queue_.size() >= integration_length_)
       {
+        //        if (time_event_left_last_ < time_event_right_last_)
         publishImageAndClearEvents();
       }
     }
@@ -154,11 +159,16 @@ void StereoDavisRenderer::publishImageAndClearEvents()
   {
     cv_bridge::CvImage cv_image_left;
     cv_bridge::CvImage cv_image_right;
+    cv_bridge::CvImage cv_event_image_left;
+    cv_bridge::CvImage cv_event_iamge_right;
 
     std::map<ros::Time, dvs_msgs::Event>::iterator it_left_begin = events_left_queue_.begin();
     std::map<ros::Time, dvs_msgs::Event>::iterator it_right_begin = events_right_queue_.begin();
     std::map<ros::Time, dvs_msgs::Event>::iterator it_left_end = events_left_queue_.end();
+    // integration_length_);
+
     std::map<ros::Time, dvs_msgs::Event>::iterator it_right_end = events_right_queue_.end();
+    // integration_length_);
 
     ros::Time time_begin = std::min(it_left_begin->first, it_right_begin->first);
     ros::Time time_end = std::min(prev(it_left_end, 1)->first, prev(it_right_end, 1)->first);
@@ -166,26 +176,14 @@ void StereoDavisRenderer::publishImageAndClearEvents()
     it_left_end = events_left_queue_.upper_bound(time_end);
     it_right_end = events_right_queue_.upper_bound(time_end);
 
-    //    std::cout << "left begin  " << it_left_begin->first << std::endl;
-    //    std::cout << "right begin " << it_right_begin->first << std::endl;
-    //    std::cout << "left end    " << it_left_begin->first << std::endl;
-    //    std::cout << "right end   " << it_right_end->first << std::endl;
-
     ros::Time curr_time_stamp;
     curr_time_stamp.fromNSec(static_cast<uint64_t>((time_begin_.toNSec() + (time_end_ - time_begin_).toNSec() / 2.0)));
 
-    if (std::distance(it_left_begin, it_left_end) < integration_length_ ||
-        std::distance(it_right_begin, it_right_end) < integration_length_)
+    if (std::distance(it_left_begin, it_left_end) < static_cast<long>(integration_length_) ||
+        std::distance(it_right_begin, it_right_end) < static_cast<long>(integration_length_))
     {
       return;
     }
-
-    std::cout << "event left pub :  " << std::distance(it_left_begin, it_left_end) << std::endl;
-    //    std::cout << "event left left:  " << events_left_queue_.size() - std::distance(it_left_begin, it_left_end)
-    //              << std::endl;
-    std::cout << "event right pub : " << std::distance(it_right_begin, it_right_end) << std::endl;
-    //    std::cout << "event right left: " << events_right_queue_.size() - std::distance(it_right_begin, it_right_end)
-    //              << std::endl;
 
     if (display_method_ == RED_BLUE)
     {
@@ -248,12 +246,28 @@ void StereoDavisRenderer::publishImageAndClearEvents()
         const int y = it_left->second.y;
 
         if (it_left->second.polarity == 1)
-          //          on_events_left.at<uint8_t>(cv::Point(x, y))++;
-          on_events_left.at<uint8_t>(cv::Point(x, y)) = 1;
+        {
+          if (is_binary_)
+          {
+            on_events_left.at<uint8_t>(cv::Point(x, y)) = 1;
+          }
+          else
+          {
+            on_events_left.at<uint8_t>(cv::Point(x, y))++;
+          }
+        }
 
         else
-          //          off_events_left.at<uint8_t>(cv::Point(x, y))++;
-          off_events_left.at<uint8_t>(cv::Point(x, y)) = 1;
+        {
+          if (is_binary_)
+          {
+            off_events_left.at<uint8_t>(cv::Point(x, y)) = 1;
+          }
+          else
+          {
+            off_events_left.at<uint8_t>(cv::Point(x, y))++;
+          }
+        }
       }
 
       // right image
@@ -264,26 +278,58 @@ void StereoDavisRenderer::publishImageAndClearEvents()
         const int y = it_right->second.y;
 
         if (it_right->second.polarity == 1)
-          //          on_events_right.at<uint8_t>(cv::Point(x, y))++;
-          on_events_right.at<uint8_t>(cv::Point(x, y)) = 1;
+        {
+          if (is_binary_)
+          {
+            on_events_right.at<uint8_t>(cv::Point(x, y)) = 1;
+          }
+          else
+          {
+            on_events_right.at<uint8_t>(cv::Point(x, y))++;
+          }
+        }
         else
-          //          off_events_right.at<uint8_t>(cv::Point(x, y))++;
-          off_events_right.at<uint8_t>(cv::Point(x, y)) = 1;
+        {
+          if (is_binary_)
+          {
+            off_events_right.at<uint8_t>(cv::Point(x, y)) = 1;
+          }
+          else
+          {
+            off_events_right.at<uint8_t>(cv::Point(x, y))++;
+          }
+        }
       }
 
-      // scale image
-      //      cv::normalize(on_events_left, on_events_left, 0, 128, cv::NORM_MINMAX, CV_8UC1);
-      //      cv::normalize(off_events_left, off_events_left, 0, 127, cv::NORM_MINMAX, CV_8UC1);
-      //      cv::normalize(on_events_right, on_events_right, 0, 128, cv::NORM_MINMAX, CV_8UC1);
-      //      cv::normalize(off_events_right, off_events_right, 0, 127, cv::NORM_MINMAX, CV_8UC1);
+      if (is_binary_)
+      {
+        cv_image_left.image += on_events_left;
+        cv_image_left.image -= off_events_left;
+        cv_image_right.image += on_events_right;
+        cv_image_right.image -= off_events_right;
 
-      cv_image_left.image += on_events_left;
-      cv_image_left.image -= off_events_left;
-      cv_image_right.image += on_events_right;
-      cv_image_right.image -= off_events_right;
+        cv::normalize(cv_image_left.image, cv_image_left.image, 0, 255, cv::NORM_MINMAX, CV_8UC1);
+        cv::normalize(cv_image_right.image, cv_image_right.image, 0, 255, cv::NORM_MINMAX, CV_8UC1);
+      }
+      else
+      {
+        // scale image
+        cv::normalize(on_events_left, on_events_left, 0, 128, cv::NORM_MINMAX, CV_8UC1);
+        cv::normalize(off_events_left, off_events_left, 0, 127, cv::NORM_MINMAX, CV_8UC1);
+        cv::normalize(on_events_right, on_events_right, 0, 128, cv::NORM_MINMAX, CV_8UC1);
+        cv::normalize(off_events_right, off_events_right, 0, 127, cv::NORM_MINMAX, CV_8UC1);
+        cv_image_left.image += on_events_left;
+        cv_image_left.image -= off_events_left;
+        cv_image_right.image += on_events_right;
+        cv_image_right.image -= off_events_right;
+        //        cv_image_left.image = cv_image_left.image + on_events_left * 30;
+        //        cv_image_left.image = cv_image_left.image - off_events_left * 30;
+        //        cv_image_right.image = cv_image_right.image + on_events_right * 30;
+        //        cv_image_right.image = cv_image_right.image - off_events_right * 30;
+      }
 
-      cv::normalize(cv_image_left.image, cv_image_left.image, 0, 255, cv::NORM_MINMAX, CV_8UC1);
-      cv::normalize(cv_image_right.image, cv_image_right.image, 0, 255, cv::NORM_MINMAX, CV_8UC1);
+      //        cv::normalize(cv_image_left.image, cv_image_left.image, 0, 254, cv::NORM_MINMAX, CV_8UC1);
+      //        cv::normalize(cv_image_right.image, cv_image_right.image, 0, 254, cv::NORM_MINMAX, CV_8UC1);
     }
 
     image_left_pub_.publish(cv_image_left.toImageMsg());
@@ -317,7 +363,17 @@ void StereoDavisRenderer::publishImageAndClearEvents()
 
       cv::Size size_left = cv_image2_left.image.size();
       cv::Size size_right = cv_image2_right.image.size();
-      cv::Mat stereo_image(size_left.height, size_left.width + size_right.width, CV_8U);
+
+      cv::Mat stereo_image;
+      if (display_method_ == RED_BLUE)
+      {
+        stereo_image.create(size_left.height, size_left.width + size_right.width, CV_8UC3);
+      }
+      else
+      {
+        stereo_image.create(size_left.height, size_left.width + size_right.width, CV_8U);
+      }
+
       cv::Mat left(stereo_image, cv::Rect(0, 0, size_left.width, size_left.height));
       cv_image2_left.image.copyTo(left);
       cv::Mat right(stereo_image, cv::Rect(size_left.width, 0, size_right.width, size_right.height));
@@ -358,24 +414,24 @@ void StereoDavisRenderer::setStereoCameraModel()
   stereo_camera_model_.fromCameraInfo(camera_info_left.getCameraInfo(), camera_info_right.getCameraInfo());
 }
 
-void StereoDavisRenderer::publishStats()
-{
-  std_msgs::Float32 msg;
-  ros::Time now = ros::Time::now();
-  for (int i = 0; i < 2; ++i)
-  {
-    if (event_stats_[i].events_mean_lasttime_ + event_stats_[i].dt <= now.toSec())
-    {
-      event_stats_[i].events_mean_lasttime_ = now.toSec();
-      for (int k = 0; k < 2; ++k)
-      {
-        msg.data = static_cast<float>(event_stats_[i].events_counter_[k] / event_stats_[i].dt);
-        event_stats_[i].events_mean_[k].publish(msg);
-        event_stats_[i].events_counter_[k] = 0;
-      }
-    }
-  }
-}
+// void StereoDavisRenderer::publishStats()
+//{
+//  std_msgs::Float32 msg;
+//  ros::Time now = ros::Time::now();
+//  for (int i = 0; i < 2; ++i)
+//  {
+//    if (event_stats_[i].events_mean_lasttime_ + event_stats_[i].dt <= now.toSec())
+//    {
+//      event_stats_[i].events_mean_lasttime_ = now.toSec();
+//      for (int k = 0; k < 2; ++k)
+//      {
+//        msg.data = static_cast<float>(event_stats_[i].events_counter_[k] / event_stats_[i].dt);
+//        event_stats_[i].events_mean_[k].publish(msg);
+//        event_stats_[i].events_counter_[k] = 0;
+//      }
+//    }
+//  }
+//}
 
 void StereoDavisRenderer::cameraInfoLeftCallback(const sensor_msgs::CameraInfo::ConstPtr& msg)
 {
